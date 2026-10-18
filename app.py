@@ -130,13 +130,30 @@ with tabs[4]:
         shifts['תחילה (שעון)']=shifts['start'].map(clock_label);shifts['סיום (שעון)']=shifts['end'].map(clock_label)
         met=pd.DataFrame(r['metrics']);x,y,z,w=st.columns(4)
         x.metric('חיילים',len(met));y.metric('משמרות סיור',sum(shifts['task']=='סיור'));z.metric('משמרות ש״ג',sum(shifts['task']=='ש״ג'));w.metric('פעילות לילה (שעות)',int(met['לילה 00–06 (שעות)'].sum()))
-        # Calculate employment rate
-        met['אחוז תעסוקה'] = (
-            met['שעות פעילות'] /
-            met['שעות זמינות'].replace(0, float('nan'))
-        ) * 100
-        
-        rates = met['אחוז תעסוקה'].dropna()
+        # Normalize metrics from older solver versions and recompute employment rates.
+        # Use the canonical v4 column names; never assume the rate column exists.
+        if 'זמינות (שעות)' not in met.columns:
+            st.error('נתוני זמינות חסרים בפלט המנוע. יש לעדכן גם את solver.py.')
+            st.stop()
+        if 'פעילות בפועל (שעות)' not in met.columns:
+            needed=['סיור (שעות)','ש״ג (שעות)','יציאות כרמל']
+            missing=[name for name in needed if name not in met.columns]
+            if missing:
+                st.error('עמודות פעילות חסרות בפלט המנוע: '+', '.join(missing)+'. יש לעדכן גם את solver.py.')
+                st.stop()
+            exit_length=float(c.get('carmel_exit_length',1))
+            met['פעילות בפועל (שעות)']=(
+                pd.to_numeric(met['סיור (שעות)'],errors='coerce').fillna(0)
+                +pd.to_numeric(met['ש״ג (שעות)'],errors='coerce').fillna(0)
+                +pd.to_numeric(met['יציאות כרמל'],errors='coerce').fillna(0)*exit_length
+            )
+            if 'נהג' in met.columns:
+                departure_count=len(r.get('departures',[]))
+                met['פעילות בפועל (שעות)']+=met['נהג'].fillna(False).astype(bool).astype(int)*departure_count*exit_length
+        available=pd.to_numeric(met['זמינות (שעות)'],errors='coerce')
+        active=pd.to_numeric(met['פעילות בפועל (שעות)'],errors='coerce')
+        met['אחוז תעסוקה']=(100*active/available.where(available>0)).round(2)
+        rates=met['אחוז תעסוקה'].dropna()
         a1,a2=st.columns(2)
         a1.metric('ממוצע אחוז תעסוקה לחייל',f'{rates.mean():.1f}%' if len(rates) else '—')
         available_total=met['זמינות (שעות)'].sum()
