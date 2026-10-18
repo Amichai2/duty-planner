@@ -130,7 +130,13 @@ with tabs[4]:
         shifts['תחילה (שעון)']=shifts['start'].map(clock_label);shifts['סיום (שעון)']=shifts['end'].map(clock_label)
         met=pd.DataFrame(r['metrics']);x,y,z,w=st.columns(4)
         x.metric('חיילים',len(met));y.metric('משמרות סיור',sum(shifts['task']=='סיור'));z.metric('משמרות ש״ג',sum(shifts['task']=='ש״ג'));w.metric('פעילות לילה (שעות)',int(met['לילה 00–06 (שעות)'].sum()))
-        rates=met['אחוז תעסוקה'].dropna()
+        # Calculate employment rate
+        met['אחוז תעסוקה'] = (
+            met['שעות פעילות'] /
+            met['שעות זמינות'].replace(0, float('nan'))
+        ) * 100
+        
+        rates = met['אחוז תעסוקה'].dropna()
         a1,a2=st.columns(2)
         a1.metric('ממוצע אחוז תעסוקה לחייל',f'{rates.mean():.1f}%' if len(rates) else '—')
         available_total=met['זמינות (שעות)'].sum()
