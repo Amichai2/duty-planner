@@ -1,10 +1,5 @@
-# Update existing GitHub / Streamlit app
-
-1. Unzip this archive locally.
-2. Open your repository `Amichai2/duty-planner` on branch `main`.
-3. Upload or replace **app.py**, **solver.py**, **timeline_pdf.py**, **requirements.txt**, and **README.md** in the repository root. Do not upload only the ZIP.
-4. Commit the changes on `main`.
-5. Streamlit Cloud should redeploy. If not, reboot the app and inspect logs.
-6. Verify that the PDF download appears in the dashboard after solving and that Carmel team offers the variable mode.
-
-The new `timeline_pdf.py` is required. `requirements.txt` adds matplotlib.
+1. Extract ZIP and upload extracted files to the root of your existing GitHub repository on branch `main` (do not upload only the ZIP).
+2. Ensure `app.py`, `solver.py`, `timeline_pdf.py`, and `requirements.txt` were replaced/added.
+3. Commit changes and wait for Streamlit Cloud to redeploy.
+4. In Streamlit Community Cloud, configure app visibility as Private and invite approved email accounts using its app management controls. Check that access actually requires login in an incognito window.
+5. Open History tab to enter past assignments; run optimization and check utilization metrics and validation report.

@@ -11,7 +11,7 @@ def example():
             'carmel_exit_length':1,'carmel_rest':3,'target_rest':8,'min_rest':3,
             'hard_no_repeat_tour_night':True,'hard_no_repeat_any_night':True,
             'time_limit':35,'tour_weight':3,'gate_weight':2,'carmel_weight':1,
-            'night_weight':1,'minimize_carmel_changes':True,'patrol_rest_target':16,'enable_patrol_rest_target':True,'enable_carmel_share':True}
+            'night_weight':1,'minimize_carmel_changes':True,'patrol_rest_target':16,'enable_patrol_rest_target':True,'enable_carmel_share':True,'history':[],'history_completeness':'partial'}
 
 
 def validate_input(c):
@@ -27,6 +27,11 @@ def validate_input(c):
     if int(c['carmel_size'])<0: raise ValueError('Invalid Carmel size.')
     if str(c['carmel_team'])!='variable' and str(c['carmel_team']) not in {str(p['team']) for p in c['people']}: raise ValueError('Unknown Carmel team.')
     if int(c.get('patrol_rest_target',16))<0: raise ValueError('Patrol rest target cannot be negative.')
+    for item in c.get('history',[]):
+        if item.get('task') not in ('סיור','ש״ג','כרמל'):raise ValueError('History task must be סיור, ש״ג or כרמל.')
+        if item.get('soldier') not in ids:raise ValueError('Unknown soldier in history: '+str(item.get('soldier')))
+        a,b=int(item['start']),int(item['end'])
+        if not (a<b<=0):raise ValueError('History intervals must end at or before planning start (hour 0).')
     for p in c['people']:
         if not isinstance(p.get('availability',[]),list):raise ValueError('Availability must be a list of windows.')
         for a,b in p.get('availability',[[0,h]]):
@@ -103,8 +108,29 @@ def solve(c):
                 s=(t//gate_len)*gate_len
                 if (i,s) in gate: model.Add(gate[i,s]+v<=1)
             acts[i].append((d,min(h,d+exit_len),v,'carmel_exit'))
+    # Known prior assignments are fixed facts. They can be incomplete (e.g. patrols only).
+    # They are NOT decision variables and never consume new-horizon capacity.
+    history_by_id=defaultdict(list)
+    history_rest_shortfalls=[]
+    history_patrol_shortfalls=[]
+    for rec in c.get('history',[]):
+        history_by_id[rec['soldier']].append((int(rec['start']),int(rec['end']),rec['task']))
+    for i,records in history_by_id.items():
+        for hs,he,hk in records:
+            if hk=='כרמל':continue  # history Carmel entries denote definition unless explicitly active
+            for s,e,v,k in acts[i]:
+                gap=s-he
+                required=car_rest if k=='carmel_exit' else min_rest
+                if gap<required:model.Add(v==0)
+                elif gap<target and k!='carmel_exit':
+                    shortfalls_var=model.NewBoolVar(f'hist_rest_{i}_{hs}_{s}_{k}')
+                    model.Add(shortfalls_var==v)
+                    history_rest_shortfalls.append((target-gap)*shortfalls_var)
+                if hk=='סיור' and k=='tour' and c.get('enable_patrol_rest_target',True):
+                    patrol_target=int(c.get('patrol_rest_target',16))
+                    if gap<patrol_target:history_patrol_shortfalls.append((patrol_target-gap)*v)
     # Minimum rest between consecutive active tasks; enforce all pairs for safety.
-    shortfalls=[]
+    shortfalls=list(history_rest_shortfalls)
     for i,events in acts.items():
         for a,(s1,e1,v1,k1) in enumerate(events):
             for s2,e2,v2,k2 in events[a+1:]:
@@ -122,6 +148,29 @@ def solve(c):
     for day in range(-1,h//24+3):
         lo=day*24-start_clock;hi=lo+6
         if lo<h and hi>0:nights.append((max(0,lo),min(h,hi)))
+    # Map absolute clock-night windows spanning the past and planning horizon.
+    # A night is identified by the calendar day on which 00:00-06:00 occurs.
+    # If history has a duty in the preceding night, prohibit the same soldier
+    # from working in the immediately following night when enabled.
+    history_night=defaultdict(set)
+    history_patrol_night=defaultdict(set)
+    for i,records in history_by_id.items():
+        for hs,he,hk in records:
+            if hk not in ('סיור','ש״ג'):continue
+            for day in range(-10, h//24+3):
+                lo=day*24-start_clock;hi=lo+6
+                if hs<hi and he>lo:history_night[i].add(day)
+                # Patrol-night definition 22:00-06:00 ending on 'day'.
+                if hk=='סיור' and hs<hi and he>lo-2:history_patrol_night[i].add(day)
+    for i in ids:
+        for s,e,v,k in acts[i]:
+            if k not in ('tour','gate'):continue
+            for day in range(-1,h//24+3):
+                lo=day*24-start_clock;hi=lo+6
+                if c.get('hard_no_repeat_any_night',True) and (day-1 in history_night[i] or day+1 in history_night[i]) and s<hi and e>lo:
+                    model.Add(v==0)
+                if k=='tour' and c.get('hard_no_repeat_tour_night',True) and (day-1 in history_patrol_night[i] or day+1 in history_patrol_night[i]) and s<hi and e>lo-2:
+                    model.Add(v==0)
     night_flags={}
     for i in ids:
         for n,(lo,hi) in enumerate(nights):
@@ -140,7 +189,7 @@ def solve(c):
     # Soft target: 16 hours (configurable) between successive patrols.
     # Penalize every too-close pair: if a pair is both selected and consecutive,
     # it necessarily appears here, so there is no way to hide a short gap.
-    patrol_shortfalls=[]
+    patrol_shortfalls=list(history_patrol_shortfalls)
     if c.get('enable_patrol_rest_target',True):
         desired=int(c.get('patrol_rest_target',16))
         for i in ids:
@@ -215,11 +264,14 @@ def solve(c):
         patrol_starts=sorted(s for (j,s),v in tour.items() if j==i and solver.Value(v))
         patrol_gaps=[patrol_starts[k+1]-(patrol_starts[k]+tour_len) for k in range(len(patrol_starts)-1)]
         patrol_violations=sum(g<int(c.get('patrol_rest_target',16)) for g in patrol_gaps) if c.get('enable_patrol_rest_target',True) else 0
+        active_hours=t_hours+g_hours+exits*exit_len+(sum(1 for d in departures if i==driver)*exit_len if i==driver else 0)
+        available_hours=len(avail[i])
+        employment_pct=round(100*active_hours/available_hours,2) if available_hours else None
         load=t_hours*weights['tour']+g_hours*weights['gate']+exits*exit_len*weights['carmel_exit']+night_hours*int(c['night_weight'])
-        metrics.append({'חייל':i,'צוות':team[i],'נהג':i==driver,'זמינות (שעות)':len(avail[i]),'סיור (שעות)':t_hours,'ש״ג (שעות)':g_hours,'יציאות כרמל':exits,'לילה 00–06 (שעות)':night_hours,'לילות פעילים':sum(solver.Value(night_flags[i,n]) for n in range(len(nights))),'מנוחה מינימלית (שעות)':min(gaps) if gaps else None,'מנוחה מינימלית בין סיורים':min(patrol_gaps) if patrol_gaps else None,'הפרות יעד מנוחה בין סיורים':patrol_violations,'עומס משוקלל':load,'עומס לשעת זמינות':round(load/max(1,len(avail[i])),2)})
+        metrics.append({'חייל':i,'צוות':team[i],'נהג':i==driver,'זמינות (שעות)':len(avail[i]),'סיור (שעות)':t_hours,'ש״ג (שעות)':g_hours,'יציאות כרמל':exits,'לילה 00–06 (שעות)':night_hours,'לילות פעילים':sum(solver.Value(night_flags[i,n]) for n in range(len(nights))),'מנוחה מינימלית (שעות)':min(gaps) if gaps else None,'מנוחה מינימלית בין סיורים':min(patrol_gaps) if patrol_gaps else None,'הפרות יעד מנוחה בין סיורים':patrol_violations,'פעילות בפועל (שעות)':active_hours,'אחוז תעסוקה':employment_pct,'עומס משוקלל':load,'עומס לשעת זמינות':round(load/max(1,len(avail[i])),2)})
     car_hours={g:sum(1 for t in range(h) if any((i,t) in car and team[i]==g and solver.Value(car[i,t]) for i in eligible)) for g in teams}
     car_target={g:round(sum(len(avail[i]) for i in eligible if team[i]==g)/max(1,sum(len(avail[i]) for i in eligible))*100,1) for g in teams}
-    return {'carmel_team_hours':car_hours,'carmel_target_pct':car_target,'status':label,'shifts':shifts,'metrics':metrics,'objective':solver.ObjectiveValue(),'bound':solver.BestObjectiveBound(),'hours':h,'start_clock_hour':start_clock,'departures':sorted(departures)}
+    return {'carmel_team_hours':car_hours,'carmel_target_pct':car_target,'status':label,'shifts':shifts,'metrics':metrics,'objective':solver.ObjectiveValue(),'bound':solver.BestObjectiveBound(),'hours':h,'start_clock_hour':start_clock,'departures':sorted(departures),'history_records':len(c.get('history',[])),'history_completeness':c.get('history_completeness','partial')}
 
 
 def audit(c,result):

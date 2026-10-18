@@ -24,7 +24,7 @@ with st.sidebar:
     st.download_button('⬇️ הורד הגדרות לשיתוף',json.dumps(c,ensure_ascii=False,indent=2).encode('utf-8'),'scenario.json','application/json')
     st.info('שיתוף: פרסמו את האפליקציה ב-Streamlit Community Cloud או שרת פרטי. אפשר להעביר תרחישים בין משתמשים כקובצי JSON.')
 
-tabs=st.tabs(['👥 כוח אדם וזמינות','⚙️ משימות ואילוצים','▶️ אופטימיזציה','📊 דשבורד ותכנית','🔍 בדיקת תקינות'])
+tabs=st.tabs(['👥 כוח אדם וזמינות','⚙️ משימות ואילוצים','📜 איושים קודמים','▶️ אופטימיזציה','📊 דשבורד ותכנית','🔍 בדיקת תקינות'])
 with tabs[0]:
     st.subheader('חיילים, צוותים, נהג וחלונות זמינות')
     st.write('ערכו את הטבלה. זמינות נכתבת כחלונות שעות יחסיים לתחילת התכנון: למשל `0-12;24-48`.')
@@ -86,6 +86,30 @@ with tabs[1]:
         c['time_limit']=st.slider('זמן חיפוש (שניות)',5,180,int(c['time_limit']),5)
     st.info('השעות בכרמל הן שעות שעון אמיתיות: 6,18. שעות הלילה הן תמיד 00:00–06:00. זמינות חיילים מוגדרת בשעות יחסיות לתחילת הסידור. הנהג נשמר לכרמל בלבד.')
 with tabs[2]:
+    st.subheader('איושים קודמים — היסטוריה חלקית נתמכת')
+    st.info('הזינו רק משימות ידועות. אין חובה להכניס את כל הש״ג/סיורים. שעות יחסיות לתחילת התכנון: מינוס 8 עד 0 = 8 השעות שלפני תחילת התכנון. רשומות העבר אינן משובצות מחדש.')
+    c['history_completeness']=st.selectbox('שלמות ההיסטוריה', ['partial','complete'],index=0 if c.get('history_completeness','partial')=='partial' else 1,format_func=lambda x:'חלקית — אין להסיק שהחייל נח' if x=='partial' else 'מלאה — כל המשימות מתועדות')
+    history_df=pd.DataFrame([{'חייל':x['soldier'],'משימה':x['task'],'התחלה':x['start'],'סיום':x['end']} for x in c.get('history',[])],columns=['חייל','משימה','התחלה','סיום'])
+    history_edit=st.data_editor(history_df,num_rows='dynamic',hide_index=True,use_container_width=True,key='history_editor')
+    upload=st.file_uploader('ייבוא היסטוריה מקובץ CSV או Excel',type=['csv','xlsx'],key='history_upload')
+    if upload and st.button('טען היסטוריה מהקובץ'):
+        try:
+            loaded=pd.read_csv(upload) if upload.name.endswith('.csv') else pd.read_excel(upload)
+            required=['חייל','משימה','התחלה','סיום']
+            if not all(x in loaded.columns for x in required):raise ValueError('נדרשות עמודות: '+', '.join(required))
+            c['history']=[{'soldier':str(r['חייל']).strip(),'task':str(r['משימה']).strip(),'start':int(r['התחלה']),'end':int(r['סיום'])} for _,r in loaded.iterrows() if pd.notna(r['חייל'])]
+            st.session_state.result=None
+            st.rerun()
+        except Exception as e:st.error(str(e))
+    if st.button('שמור היסטוריה'):
+        try:
+            c['history']=[{'soldier':str(r['חייל']).strip(),'task':str(r['משימה']).strip(),'start':int(r['התחלה']),'end':int(r['סיום'])} for _,r in history_edit.iterrows() if pd.notna(r['חייל']) and str(r['חייל']).strip()]
+            st.session_state.result=None
+            st.success(f"נשמרו {len(c['history'])} משימות קודמות")
+        except Exception as e:st.error(str(e))
+    st.download_button('⬇️ תבנית CSV להיסטוריה',pd.DataFrame([{'חייל':'A1','משימה':'סיור','התחלה':-8,'סיום':0}]).to_csv(index=False).encode('utf-8-sig'),'history_template.csv','text/csv')
+    st.caption('כרמל היסטורי מציין הגדרה בלבד, ואינו נחשב ליציאה פעילה. בגרסה זו נטענים רק איושים שהסתיימו לפני תחילת התכנון; נעילת איושים עתידיים אינה כלולה.')
+with tabs[3]:
     st.subheader('הרצת אופטימיזציה')
     st.write('המנוע מחפש פתרון המכסה את המשימות ללא חפיפות, עם צוותים אורגניים, זמינות אישית ומנוחה קשיחה. לאחר מכן הוא משפר מנוחה, איזון עומסים ויציבות כרמל.')
     if st.button('🚀 הרץ אופטימיזציה',type='primary',use_container_width=True):
@@ -95,7 +119,7 @@ with tabs[2]:
             st.success(f"סטטוס: {st.session_state.result['status']}") if 'shifts' in st.session_state.result else st.error(st.session_state.result['message'])
         except Exception as e:st.error(str(e))
     if st.session_state.result:st.json({k:v for k,v in st.session_state.result.items() if k not in ('shifts','metrics')})
-with tabs[3]:
+with tabs[4]:
     r=st.session_state.result
     if not r or 'shifts' not in r:st.info('יש להריץ אופטימיזציה תחילה.')
     else:
@@ -106,9 +130,16 @@ with tabs[3]:
         shifts['תחילה (שעון)']=shifts['start'].map(clock_label);shifts['סיום (שעון)']=shifts['end'].map(clock_label)
         met=pd.DataFrame(r['metrics']);x,y,z,w=st.columns(4)
         x.metric('חיילים',len(met));y.metric('משמרות סיור',sum(shifts['task']=='סיור'));z.metric('משמרות ש״ג',sum(shifts['task']=='ש״ג'));w.metric('פעילות לילה (שעות)',int(met['לילה 00–06 (שעות)'].sum()))
+        rates=met['אחוז תעסוקה'].dropna()
+        a1,a2=st.columns(2)
+        a1.metric('ממוצע אחוז תעסוקה לחייל',f'{rates.mean():.1f}%' if len(rates) else '—')
+        available_total=met['זמינות (שעות)'].sum()
+        a2.metric('אחוז תעסוקה משוקלל לפי זמינות',f"{100*met['פעילות בפועל (שעות)'].sum()/available_total:.1f}%" if available_total else '—')
+        if c.get('history') and c.get('history_completeness')=='partial':st.warning('היסטוריית האיושים חלקית: מדדי מנוחה ולילות אינם מאומתים ביחס למשימות עבר שלא הוזנו.')
         st.subheader('סידור עבודה')
         st.dataframe(shifts[['תחילה (שעון)','סיום (שעון)','תחילה (שעה)','סיום (שעה)','משימה','צוות','חיילים']],hide_index=True,use_container_width=True,height=380)
         st.subheader('עומס לכל חייל')
+        st.bar_chart(met.set_index('חייל')[['אחוז תעסוקה']])
         st.bar_chart(met.set_index('חייל')[['סיור (שעות)','ש״ג (שעות)','לילה 00–06 (שעות)']])
         st.dataframe(met,hide_index=True,use_container_width=True)
         if c['carmel_team']=='variable':
@@ -123,6 +154,7 @@ with tabs[3]:
         with pd.ExcelWriter(output,engine='openpyxl') as writer:
             shifts[['תחילה (שעון)','סיום (שעון)','תחילה (שעה)','סיום (שעה)','משימה','צוות','חיילים']].to_excel(writer,sheet_name='איושים',index=False)
             met.to_excel(writer,sheet_name='עומסים',index=False)
+            pd.DataFrame(c.get('history',[]),columns=['soldier','task','start','end']).to_excel(writer,sheet_name='היסטוריה',index=False)
             pd.DataFrame(audit(c,r)).to_excel(writer,sheet_name='בדיקת תקינות',index=False)
             pd.DataFrame([{'פרמטר':k,'ערך':json.dumps(v,ensure_ascii=False)} for k,v in c.items() if k!='people']).to_excel(writer,sheet_name='פרמטרים',index=False)
             for sheet in writer.book:
@@ -134,7 +166,7 @@ with tabs[3]:
                     sheet.column_dimensions[letter].width=min(50,max(15,max(len(str(v.value or '')) for v in list(col)[:100])+2))
         st.download_button('⬇️ הורד Excel מלא',output.getvalue(),'duty_plan.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         st.download_button('⬇️ הורד תוצאות JSON',json.dumps(r,ensure_ascii=False,indent=2).encode(),'result.json','application/json')
-with tabs[4]:
+with tabs[5]:
     r=st.session_state.result
     if not r or 'shifts' not in r:st.info('יש להריץ אופטימיזציה תחילה.')
     else:
