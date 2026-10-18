@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 from openpyxl.styles import Font,PatternFill
 from solver import example,solve,audit
+from timeline_pdf import build_timeline_pdf
 
 st.set_page_config(page_title='Duty Planner | תכנון איושים',page_icon='📅',layout='wide')
 st.markdown('''<style>.block-container{padding-top:1.3rem;max-width:1450px}h1,h2,h3{direction:rtl} .stMetric{background:#f1f6f8;border-radius:12px;padding:12px}</style>''',unsafe_allow_html=True)
@@ -56,7 +57,9 @@ with tabs[1]:
         c['gate_length']=st.number_input('משך משמרת ש״ג (שעות)',1,12,int(c['gate_length']))
     with b:
         teams=sorted({str(p['team']) for p in c['people']})
-        c['carmel_team']=st.selectbox('צוות כרמל',teams,index=teams.index(str(c['carmel_team'])) if str(c['carmel_team']) in teams else 0)
+        options=teams+['variable']
+        c['carmel_team']=st.selectbox('צוות כרמל',options,index=options.index(str(c['carmel_team'])) if str(c['carmel_team']) in options else 0,format_func=lambda x:'משתנה — חלוקה יחסית' if x=='variable' else f'צוות {x}')
+        if c['carmel_team']=='variable':st.caption('ארבעת הלוחמים יהיו מאותו צוות בכל שעה; יחס האיוש יותאם לשעות הזמינות של הצוותים.')
         c['carmel_size']=st.number_input('מספר לוחמי כרמל (ללא נהג)',0,12,int(c['carmel_size']))
         people_ids=[p['id'] for p in c['people']]
         c['driver']=st.selectbox('נהג קבוע',people_ids,index=people_ids.index(c['driver']) if c['driver'] in people_ids else 0)
@@ -71,6 +74,9 @@ with tabs[1]:
         c['hard_no_repeat_tour_night']=st.checkbox('איסור סיור לילה בלילות רצופים',bool(c['hard_no_repeat_tour_night']))
         c['hard_no_repeat_any_night']=st.checkbox('איסור פעילות לילה בלילות רצופים',bool(c['hard_no_repeat_any_night']))
         c['minimize_carmel_changes']=st.checkbox('מזעור חילופי כרמל',bool(c['minimize_carmel_changes']))
+        c['enable_patrol_rest_target']=st.checkbox('הפעל יעד מנוחה בין סיורים',bool(c.get('enable_patrol_rest_target',True)))
+        c['patrol_rest_target']=st.number_input('יעד שעות מנוחה מסיום סיור לתחילת הבא',0,48,int(c.get('patrol_rest_target',16)))
+        c['enable_carmel_share']=st.checkbox('איזון יחסי של כרמל בין הצוותים',bool(c.get('enable_carmel_share',True)),disabled=c['carmel_team']!='variable')
     with st.expander('משקלי עומס ומגבלת חיפוש'):
         x,y,z,w=st.columns(4)
         c['tour_weight']=x.number_input('משקל סיור',1,10,int(c['tour_weight']))
@@ -105,6 +111,14 @@ with tabs[3]:
         st.subheader('עומס לכל חייל')
         st.bar_chart(met.set_index('חייל')[['סיור (שעות)','ש״ג (שעות)','לילה 00–06 (שעות)']])
         st.dataframe(met,hide_index=True,use_container_width=True)
+        if c['carmel_team']=='variable':
+            st.subheader('חלוקת כרמל בין הצוותים')
+            ch=r.get('carmel_team_hours',{});tot=sum(ch.values())
+            st.dataframe(pd.DataFrame([{'צוות':g,'שעות איוש בפועל':n,'אחוז בפועל':round(100*n/tot,1) if tot else 0,'יעד אחוז':r.get('carmel_target_pct',{}).get(g,0)} for g,n in ch.items()]),hide_index=True,use_container_width=True)
+        try:
+            pdf_bytes=build_timeline_pdf(c,r)
+            st.download_button('⬇️ הורד PDF — ציר זמן לכל חייל',pdf_bytes,'duty_activity_timeline.pdf','application/pdf')
+        except Exception as e:st.warning(f'לא ניתן ליצור PDF: {e}')
         output=io.BytesIO()
         with pd.ExcelWriter(output,engine='openpyxl') as writer:
             shifts[['תחילה (שעון)','סיום (שעון)','תחילה (שעה)','סיום (שעה)','משימה','צוות','חיילים']].to_excel(writer,sheet_name='איושים',index=False)
