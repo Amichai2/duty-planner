@@ -7,7 +7,7 @@ def example():
     people = ([{'id':f'A{i}','team':'1','driver':False,'availability':[[0,48]]} for i in range(1,7)] +
               [{'id':f'B{i}','team':'2','driver':i==1,'availability':[[0,48]]} for i in range(1,17)])
     return {'hours':48,'start_offset_hours':0,'people':people,'tour_size':4,'tour_length':8,'gate_length':2,
-            'carmel_team':'2','carmel_size':4,'driver':'B1','carmel_departures':[0,12],
+            'carmel_team':'2','carmel_size':4,'driver':'B1','carmel_departures':[6,18],
             'carmel_exit_length':1,'carmel_rest':3,'target_rest':8,'min_rest':3,
             'hard_no_repeat_tour_night':True,'hard_no_repeat_any_night':True,
             'time_limit':35,'tour_weight':3,'gate_weight':2,'carmel_weight':1,

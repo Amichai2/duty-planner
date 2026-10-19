@@ -1,5 +1,6 @@
 """Create a landscape Gantt PDF using the roster's real clock and task colors."""
 from io import BytesIO
+from datetime import datetime, timedelta
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -25,7 +26,12 @@ def build_timeline_pdf(config,result):
     for t in range(hours):
         if 0<=(clock+t)%24<6:ax.axvspan(t,t+1,color='#64748b',alpha=0.075,zorder=-2)
     ticks=list(range(0,hours+1,2));ax.set_xticks(ticks)
-    ax.set_xticklabels([f'{(clock+t)%24:02d}:00' for t in ticks],rotation=55,ha='right',fontsize=7)
+    if config.get('start_date'):
+        anchor=datetime.strptime(str(config['start_date']), '%Y-%m-%d').replace(hour=clock)
+        labels=[(anchor+timedelta(hours=t)).strftime('%d/%m %H:%M') for t in ticks]
+    else:
+        labels=[f'{(clock+t)%24:02d}:00' for t in ticks]
+    ax.set_xticklabels(labels,rotation=55,ha='right',fontsize=7)
     ax.set_xlim(0,hours);ax.set_ylim(-0.7,len(people)-0.3);ax.invert_yaxis()
     ax.set_yticks(range(len(people)));ax.set_yticklabels(people,fontsize=8)
     ax.grid(axis='x',alpha=.16);ax.set_axisbelow(True)

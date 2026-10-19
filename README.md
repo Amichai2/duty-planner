@@ -1,15 +1,25 @@
-# Duty Planner v4
+# Duty Planner v5 — clock-based user interface
 
-Adds partial historical duties (CSV/Excel/manual) and active-duty utilization metrics to v3. History records use relative hours ending at or before 0 (planning start), e.g. `-8,0`. Known prior patrol/guard records constrain the new plan's minimum rest, soft rest and repeat-night rules; missing history is not treated as confirmed rest. Historical Carmel entries are definition-only and do not imply actual departures.
+This version retains the v4 OR-Tools solver and its integer-hour relative-time representation, but changes the user-facing schedule start, availability and previous-duty history to actual calendar dates and whole clock hours.
 
-Active hours = patrol hours + guard hours + Carmel exit hours (including driver). Utilization = active hours / availability hours. Dashboard reports per-person average and weighted overall rate.
+## What's new
+- Set a start date and a whole-hour start time (00:00–23:00).
+- Enter soldier availability as one or more lines in the format `YYYY-MM-DD HH:00 | YYYY-MM-DD HH:00`.
+- Enter previous shifts using actual date/time in the editable history table or CSV/XLSX import.
+- View actual start/end date and time in the roster and Excel; PDF axis includes calendar dates.
+- Older scenario JSON files with relative hours are supported. When loading a legacy file, the app uses today's date and preserves its original clock hour and relative availability/history.
+- The solver still treats nighttime as 00:00–06:00, and Carmel departures as clock hours.
 
-## Run
-`pip install -r requirements.txt`
-`streamlit run app.py`
+## Notes
+- All times are whole hours in the planning location's local clock. No time zone conversion is applied.
+- Change the start date/time **before** editing soldier availability and previous duty records.
+- Existing relative JSON data are kept internally; the UI translates them. When moving the start date, existing windows shift in calendar time with the plan.
+- In the default example, Carmel departures are now correctly specified as clock hours `6,18` (instead of `0,12`). Existing saved JSON values are preserved unchanged; review Carmel departure settings when loading old scenarios.
+- Previous-duty records must end at or before the planning start.
+- Streamlit's data editor supports pasting date/time text into cells; multiple availability intervals are separated by newlines.
 
-## Private access
-Use Streamlit Community Cloud app settings to set visibility to Private and invite specific email addresses. This is configured in Streamlit, not in this code. Verify access restrictions in your own Cloud account. Never store operationally sensitive rosters in a public repository.
+## Deploy
+Extract ZIP and upload its contents (not the ZIP) to the `main` branch at the repository root. Streamlit Cloud uses `app.py`. Install packages from `requirements.txt`.
 
-## Limitations
-Historical shifts must end at or before time 0. Locking preassigned future shifts is not implemented. Historical Carmel definitions do not encode exits. Tests in this environment were limited to syntax and static inspection because OR-Tools and Streamlit are not installed. The previous engine's constraints and audit coverage require end-to-end validation before operational use.
+## Validation
+Python syntax and standalone time conversion tests passed. Full Streamlit + OR-Tools integration was not run in this environment; review and validate solver outputs before operational use.
